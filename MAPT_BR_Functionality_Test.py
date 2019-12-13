@@ -565,106 +565,86 @@ class BRFunctionalityTest:
     def downstream_outside_port(self):
         self.m_finished = False
         self.packet_error = False
-        self.comment = "\n IPv4_OUTSIDE_PORT_NO"
         q = Queue()
-        v4_cap_filter = 'dst {}'.format(self.ipv4_internet_address)
-        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv4 -> IPv6 Outside (Reserved) Port  \n")
+        v6_cap_filter = '(net 192.0.2.0/24 and icmp) or dst {}'.format(self.ipv6_cpe_address)
+        sniffer = Thread(target=self.v6sniffer, args=(q, v6_cap_filter, 1))
         sniffer.daemon = True
         sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64', 10, dir_uuid + "/4to6_outside_port.pcap" ))
+        capture.daemon = True
+        capture.start()
         while not self.m_finished:
             ip = IP(src=self.ipv4_internet_address, dst=self.ipv4_map_address)
             udp = UDP(sport=self.ipv4_udp_or_tcp_internet_port, dport=1001)
             payload = "a" * 82
+            tx_pkt = ip / udp / payload
             send(ip / udp / payload, iface=self.scapy_interface, verbose=False)
-        if not q.empty():
-            file_name = self.comment.lower() + ".pcap"
-            pktdump = PcapWriter(file_name, append=True, sync=True)
-            while not q.empty():
-                pkt = q.get()
-                # print(pkt.show())
-                # file_name = self.comment.lower()+".pcap"
-                # wrpcap(file_name, pkt)
-                pktdump.write(pkt)
-	try:
-            pkt
-        except NameError:
-            self.comment += "\n  ICMPv4 not received - the packet might have been dropped silently"
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
+            sleep(.5)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
+        try:
+            pkt = q.get(timeout=1)
+            if pkt[0][1].proto == 17:
+                fh.write("Packet translated normally when it should be dropped\n")
+                fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+                self.packet_error = True
+        except Empty:
+            fh.write("Packet not received - the packet might have been dropped silently\n")
+            print("Downstream Packet to Reserved Port Dropped: CONDITIONAL PASS\n")
             fh.close()
-            print "Downstream Packet to Reserved Port Dropped: CONDITIONAL PASS"
             return
-        if pkt[0][1].proto != 1:
-            self.comment += "\n  ICMPv4 Packet Not Received"
-            self.packet_error = True
-        if pkt[0][1].proto == 17:
-            self.comment += "\n Packet Translated Normally"
-            self.packet_error = True
-            self.comment += "\n ICMPv4 Packet Received\n  "
-            self.comment += pkt[0][2].type
-            self.comment += "\n  "
-            self.comment += pkt[0][2].code
-            self.comment += "\n"
-            self.packet_error = True
         if self.packet_error:
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
-            fh.close()
-            print "IPv4 Packet to Dest Reserved Port Dropped: FAIL"
+            print("IPv4 Packet to Dest Reserved Port Dropped: FAIL")
         if not self.packet_error:
-            print "IPv4 Packet to Dest Reserved Port Dropped: PASS"
+            print("IPv4 Packet to Dest Reserved Port Dropped: PASS")
+        fh.close()
 
     # Check for outside port
     # Send 128 frame size packet for ipv6/udp and udp.srcport = 1001
     # Received packet should be ICMPv6(Source address failed ingress/egress policy)
+    # Receiving no packets is valid
     def upstream_outside_port(self):
         self.m_finished = False
         self.packet_error = False
-        self.comment = "\n IPv6_OUTSIDE_PORT"
         q = Queue()
-        v6_cap_filter = 'icmp6 and dst {}'.format(self.ipv6_cpe_address)
-        sniffer = Thread(target=self.v6sniffer, args=(q, v6_cap_filter, 1))
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv6 -> IPv4 Outside (Reserved) Port  \n")
+        v4_cap_filter = '(net 2001:db8::/32 and icmp6) or dst {}'.format(self.ipv4_map_address)
+        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
         sniffer.daemon = True
         sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64', 10, dir_uuid + "/6to4_outside_port.pcap" ))
+        capture.daemon = True
+        capture.start()
         while not self.m_finished:
             ip = IPv6(src=self.ipv6_cpe_address, dst=self.ipv6_map_address)
             udp = UDP(sport=1001, dport=self.ipv6_udp_or_tcp_internet_port)
             payload = "a" * 82
+            tx_pkt = ip / udp / payload
             send(ip / udp / payload, iface=self.scapy_interface, verbose=False)
-        if not q.empty():
-            file_name = self.comment.lower() + ".pcap"
-            pktdump = PcapWriter(file_name, append=True, sync=True)
-            while not q.empty():
-                pkt = q.get()
-                # print(pkt.show())
-                # file_name = self.comment.lower()+".pcap"
-                # wrpcap(file_name, pkt)
-                pktdump.write(pkt)
+            sleep(.5)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
         try:
-            pkt
-        except NameError:
-            self.comment += "\n  ICMPv6 not received - the packet might have been dropped silently"
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
+            pkt = q.get(timeout=1)
+            if pkt[0][1].proto == 17:
+                fh.write("Packet translated normally when it should be dropped\n")
+                fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+                self.packet_error = True
+        except Empty:
+            fh.write("Packet not received - the packet might have been dropped silently\n")
+            print("Downstream Packet to Reserved Port Dropped: CONDITIONAL PASS\n")
             fh.close()
-            print "Upstream Packet to Reserved Port Dropped: CONDITIONAL PASS"
             return
-        if pkt[0][1].nh != 58:
-            self.comment += "\n  ICMP6 not received"
-            self.packet_error = True
-        if pkt[0][2].type != 1:
-            self.comment += "\n  Incorrect Type Number"
-            self.packet_error = True
-        if pkt[0][2].code != 5:
-            self.comment += "\n  Incorrect Code Number"
-            self.packet_error = True
         if self.packet_error:
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
-            fh.close()
-            print "IPv6 Packet to Source Reserved Port Dropped: FAIL"
+            print("IPv6 Packet from Src Reserved Port Dropped: FAIL")
         if not self.packet_error:
-            print "IPv4 Packet to Dest Reserved Port Dropped: PASS"
+            print("IPv6 Packet from Src Reserved Port Dropped: PASS")
+        fh.close()
 
     # Check for packet fragmentation by the BR
     # Send 1499 frame size packet for ipv4/udp. DF=0
@@ -970,269 +950,147 @@ class BRFunctionalityTest:
             print("IPv4 -> IPv6 Echo Reply: PASS")
         fh.close()
 
-
-    # Destination Unreachable - No route to destination, Communication with destination administratively prohibited,
-    # Beyond scope of source address, Address unreachable, Port unreachable (Type 1, Code - 0/1/2/3/4)
-    def upstream_destination_unreachable(self):
-        code_values = [0, 1, 2, 3, 4]
-        for code_value in code_values:
-            self.m_finished = False
-            self.packet_error = False
-            self.comment = "\n ICMPv6_DESTINATION_UNREACHABLE"
-            q = Queue()
-            v4_cap_filter = 'icmp and dst {}'.format(self.ipv4_internet_address)
-            sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 5))
-            sniffer.daemon = True
-            sniffer.start()
-            while not self.m_finished:
-                ip = IPv6(src=self.ipv6_cpe_address, dst=self.ipv6_map_address)
-                icmp = ICMPv6DestUnreach()
-                icmp.code = code_value
-                ip1 = IPv6(src=self.ipv6_map_address, dst=self.ipv6_cpe_address)
-                udp = UDP(sport=self.ipv6_udp_or_tcp_internet_port, dport=self.ipv6_udp_or_tcp_map_port)
-                payload = "H" * 10
-                send(ip / icmp / ip1 / udp / payload, iface=self.scapy_interface, verbose=False)
-            if not q.empty():
-                file_name = self.comment.lower() + ".pcap"
-                pktdump = PcapWriter(file_name, append=True, sync=True)
-                while not q.empty():
-                    pkt = q.get()
-                    # print(pkt.show())
-                    pktdump.write(pkt)
-            try:
-                pkt
-            except NameError:
-                self.comment += "\n  ICMPv4 Packet not received"
-                print "Upstream Dest Unreachable Translation: FAIL"
-                return
-            self.v4_address_check(pkt)
-            if pkt[0][1].proto != 1:
-                self.comment += "\n  ICMPv6 not received"
-                self.packet_error = True
-            if pkt[0][2].type != 3:
-                self.comment += "\n  Incorrect Type Number"
-                self.packet_error = True
-            if code_value == 0 and pkt[0][2].code != 1:
-                self.comment += "\n  Incorrect Code Number for ICMPv6 Code 0 - was " + str(pkt[0][2].code)
-                self.packet_error = True
-            if code_value == 1 and pkt[0][2].code != 10:
-                self.comment += "\n  Incorrect Code Number for ICMPv6 Code 1 - was " + str(pkt[0][2].code)
-                self.packet_error = True
-            if code_value == 2 and pkt[0][2].code != 1:
-                self.comment += "\n  Incorrect Code Number for ICMPv6 Code 2 - was " + str(pkt[0][2].code)
-                self.packet_error = True
-            if code_value == 3 and pkt[0][2].code != 1:
-                self.comment += "\n  Incorrect Code Number for ICMPv6 Code 3 - was " + str(pkt[0][2].code)
-                self.packet_error = True
-            if code == 4 and pkt[0][2].code != 3:
-                self.comment += "\n  Incorrect Code Number for ICMPv6 Code 4 - was " + str(pkt[0][2].code)
-                self.packet_error = True
-            if self.packet_error:
-                fh = open("test_results.txt", "a")
-                fh.write(self.comment)
-                fh.close()
-                print "Upstream Dest Unreachable Translation for ICMPv6 Code " + str(code_value) + " : FAIL"
-            if not self.packet_error:
-                print "Upstream Dest Unreachable Translation for ICMPv6 Code " + str(code_value) + " : PASS"
-
+    # This simulates an internet side node with a reduced MTU sending Need Frag message back to the MAP CPE
+    # The BR should translate
     def downstream_icmp_frag_required(self):
         self.m_finished = False
         self.packet_error = False
-        self.comment = "\n IPv4_PACKET_NORMAL_TRANSLATION"
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv4 -> IPv6 Translated ICMP Frag Required \n")
         q = Queue()
-        v4_cap_filter = 'src {}'.format(self.ipv4_map_address)
-        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
+        v6_cap_filter = 'icmp6 and dst {}'.format(self.ipv6_cpe_address)
+        sniffer = Thread(target=self.v6sniffer, args=(q, v6_cap_filter, 1))
         sniffer.daemon = True
         sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64', 10, dir_uuid + "/4to6_icmp_frag_required.pcap" ))
+        capture.daemon = True
+        capture.start()
         while not self.m_finished:
-            ip = IP(src="192.168.1.2", dst=self.ipv4_map_address)
-            icmp = ICMP(type=3, code=4)
-            udp = UDP(sport=self.ipv4_udp_or_tcp_internet_port, dport=self.ipv4_udp_or_tcp_map_port)
+            ip = IP(src=self.ipv4_local_address, dst=self.ipv4_map_address)
+            icmp = ICMP(type=3, code=4, nexthopmtu = 1300)
             ip2 = IP(src=self.ipv4_map_address, dst=self.ipv4_internet_address)
+            udp = UDP(sport=self.ipv4_udp_or_tcp_map_port, dport=self.ipv4_udp_or_tcp_internet_port)
             payload = "a" * 64
+            tx_pkt = ip / icmp / ip2 / udp / payload
             send(ip / icmp / ip2 / udp / payload, iface=self.scapy_interface, verbose=False)
-        if not q.empty():
-            file_name = self.comment.lower() + ".pcap"
-            pktdump = PcapWriter(file_name, append=True, sync=True)
-            while not q.empty():
-                pkt = q.get()
-                # print(pkt.show())
-                # file_name = self.comment.lower()+".pcap"
-                # wrpcap(file_name, pkt)
-                pktdump.write(pkt)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
         try:
-            pkt
-        except NameError:
-            self.comment += "\n  IPv4 ICMP Packet Not Received"
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
+            pkt = q.get(timeout=1)
+            fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+            if pkt[0][2].type != 2 or pkt[0][2].code != 0:
+                self.packet_error = True
+                fh.write("ICMPv6 is not Packet too Big \n")
+            if pkt[0][2].mtu != 1320:
+                self.packet_error = True
+                fh.write("Next Hop MTU is not set to 1300\n")
+            if self.packet_error:
+                print("IPv4 -> IPv6 Translated ICMP Frag Required: FAIL\n")
+            if not self.packet_error:
+                print("IPv4 -> IPv6 Translated ICMP Frag Required: PASS\n")
+            fh.close()
+        except Empty:
+            print("IPv4 -> IPv6 Translated ICMP Frag Required: FAIL")
+            fh.write("No ICMPv6 Packet Received")
             fh.close()
             return
-        self.v6_address_check(pkt)
-        self.v6_port_check(pkt)
-        if pkt[0][1].code == 44:
-            self.v6_address_check(pkt)
-            self.v6_port_check(pkt)
-            self.packet_error = True
-            self.comment += "\n  Fragment Header added"
-        if self.packet_error:
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
-            fh.close()
-            print "Downstream UDP Packet: FAIL"
-        if not self.packet_error:
-            print "Downstream UDP Packet: PASS"
 
 
-
-
-    # Received packet should be translated into IPv6 packet and no fragment header
-    def downstream_udp_frag_required(self):
+    # Packet is sent with DF=1 and larger than domain MTU.
+    # The BR should respond with an Dest Unreachable, Fraq Needed and DF set
+    def downstream_br_udp_frag_required(self):
         self.m_finished = False
         self.packet_error = False
-        self.comment = "\n IPv4_PACKET_NORMAL_TRANSLATION"
         q = Queue()
-        v4_cap_filter = 'src {}'.format(self.ipv4_map_address)
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv4 -> IPv6 UDP Frag Required and DF Set   \n")
+        v4_cap_filter = 'icmp and dst {}'.format(self.ipv4_internet_address)
         sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
         sniffer.daemon = True
         sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64 or net 192.0.2.0/24', 10, dir_uuid + "/4to4_br_udp_frag_required.pcap" ))
+        capture.daemon = True
+        capture.start()
         while not self.m_finished:
             ip = IP(src=self.ipv4_internet_address, dst=self.ipv4_map_address, flags='DF')
             udp = UDP(sport=self.ipv4_udp_or_tcp_internet_port, dport=self.ipv4_udp_or_tcp_map_port)
             payload = "a" * 1500
+            tx_pkt = ip / udp / payload
             send(ip / udp / payload, iface=self.scapy_interface, verbose=False)
-        if not q.empty():
-            file_name = self.comment.lower() + ".pcap"
-            pktdump = PcapWriter(file_name, append=True, sync=True)
-            while not q.empty():
-                pkt = q.get()
-                # print(pkt.show())
-                # file_name = self.comment.lower()+".pcap"
-                # wrpcap(file_name, pkt)
-                pktdump.write(pkt)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
         try:
-            pkt
-        except NameError:
-            self.comment += "\n  IPv4 ICMP Packet Not Received"
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
+            pkt = q.get(timeout=1)
+            fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+            if pkt[0][2].type != 3 or pkt[0][2].code != 4:
+                self.packet_error = True
+                fh.write("ICMP packet received is not Frag Needed and DF Set\n")
+            if pkt[0][2].nexthopmtu != 1480:
+                self.packet_error = True
+                fh.write("Next Hop MTU is not set to 1480\n")
+            if self.packet_error:
+                print("IPv4 -> IPv6 UDP Frag Required and DF Set: FAIL\n")
+            if not self.packet_error:
+                print("IPv4 -> IPv6 UDP Frag Required and DF Set: PASS\n")
+        except Empty:
+            print("Downstream UDP Packet: FAIL")
+            fh.write("No ICMP Packet Received")
             fh.close()
             return
-        self.v6_address_check(pkt)
-        self.v6_port_check(pkt)
-        if pkt[0][1].code == 44:
-            self.v6_address_check(pkt)
-            self.v6_port_check(pkt)
-            self.packet_error = True
-            self.comment += "\n  Fragment Header added"
         if self.packet_error:
             fh = open("test_results.txt", "a")
             fh.write(self.comment)
             fh.close()
-            print "Downstream UDP Packet: FAIL"
-        if not self.packet_error:
-            print "Downstream UDP Packet: PASS"
 
 
-    def packet_too_big(self):
+    # This simulates an IPv6 node beyond the BR having a reduced MTU and signally PMTUD back towards the internet
+    # This should never really happen as MTU inside the MAP domain should be "well managed", but we test anyways
+    def upstream_packet_too_big(self):
         self.m_finished = False
         self.packet_error = False
-        self.comment = "\n ICMPv6_PACKET_TOO_BIG"
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("ICMPv6 packet too big -> ICMP Frag Required \n")
         q = Queue()
         v4_cap_filter = 'icmp and dst {}'.format(self.ipv4_internet_address)
-        sniffer = Thread(target=self.v6sniffer, args=(q, v4_cap_filter, 17))
+        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
         sniffer.daemon = True
         sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64 or net 192.0.2.0/24', 10, dir_uuid + "/6to4_icmp6_packet_too_big" ))
+        capture.daemon = True
+        capture.start()
         while not self.m_finished:
-            ip = IPv6(src="2001:db8:eeee:eeee::6", dst=self.ipv6_map_address)
+            ip = IPv6(src=self.ipv6_local_address, dst=self.ipv6_map_address)
             icmp = ICMPv6PacketTooBig()
             icmp.mtu = 1280
-            ip1 = IPv6(src=self.ipv6_map_address, dst=self.ipv6_cpe_address)
+            ip2 = IPv6(src=self.ipv6_map_address, dst=self.ipv6_cpe_address)
             udp = UDP(sport=self.ipv6_udp_or_tcp_internet_port, dport=self.ipv6_udp_or_tcp_map_port)
             payload = "H" * 64
-            send(ip / icmp / ip1 / udp / payload, iface=self.scapy_interface, verbose=False)
-        if not q.empty():
-            file_name = self.comment.lower() + ".pcap"
-            pktdump = PcapWriter(file_name, append=True, sync=True)
-            while not q.empty():
-                pkt = q.get()
-                #print(pkt.show())
-                pktdump.write(pkt)
-                q.task_done()
+            tx_pkt = ip / icmp / ip2 / udp / payload
+            send(ip / icmp / ip2 / udp / payload, iface=self.scapy_interface, verbose=False)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
         try:
-            pkt
-        except NameError:
-            self.comment += "\n  ICMPv4 Packet not received"
-            print "Upstream Packet too Big Translation: FAIL"
-            return
-        self.v4_address_check(pkt)
-        if pkt[0][1].proto != 1:
-            self.comment += "\n  ICMPv6 not received"
-            self.packet_error = True
-        if pkt[0][2].type != 3:
-            self.comment += "\n  Incorrect Type Number"
-            self.packet_error = True
-        if pkt[0][2].code != 4:
-            self.comment += "\n  Incorrect Code Number"
-            self.packet_error = True
-        if pkt[0][ICMP].nexthopmtu != rx_mtu:
-            self.comment += "\n  Incorrect MTU values - should be " + str(rx_mtu) + " but was " + str(pkt[0][ICMP].nexthopmtu)
-            self.packet_error = True
-        if self.packet_error:
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
+            pkt = q.get(timeout=1)
+            fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+            if pkt[0][2].type != 3 or pkt[0][2].code != 4:
+                self.packet_error = True
+                fh.write("ICMPv6 is not Packet too Big \n")
+            if pkt[0][2].mtu != 1300:
+                self.packet_error = True
+                fh.write("Next Hop MTU is not set to 1300\n")
+            if self.packet_error:
+                print("ICMPv6 packet too big -> ICMP Frag Required: FAIL\n")
+            if not self.packet_error:
+                print("ICMPv6 packet too big -> ICMP Frag Required: PASS\n")
             fh.close()
-            print "Upstream Packet Too Big Translation (IPv6: " + str(mtu_value) + ", IPv4: " + str(rx_mtu) + "): FAIL"
-        if not self.packet_error:
-            print "Upstream Packet Too Big Translation (IPv6: " + str(mtu_value) + ", IPv4: " + str(rx_mtu) + "): PASS"
-
-    def time_exceeded(self):
-        self.m_finished = False
-        self.packet_error = False
-        self.comment = "\n ICMPv6_TIME_EXCEEDED"
-        q = Queue()
-        v4_cap_filter = 'icmp and dst {}'.format(self.ipv4_internet_address)
-        sniffer = Thread(target=self.v6sniffer, args=(q, v4_cap_filter, 5))
-        sniffer.daemon = True
-        sniffer.start()
-        while not self.m_finished:
-            ip = IPv6(src=self.ipv6_cpe_address, dst=self.ipv6_map_address)
-            icmp = ICMPv6TimeExceeded()
-            icmp.code = 0
-            ip1 = IPv6(src=self.ipv6_map_address, dst=self.ipv6_cpe_address)
-            udp = UDP(sport=self.ipv6_udp_or_tcp_internet_port, dport=self.ipv6_udp_or_tcp_map_port)
-            payload = "H" * 10
-            send(ip / icmp / ip1 / udp / payload, iface=self.scapy_interface, verbose=False)
-        if not q.empty():
-            file_name = self.comment.lower() + ".pcap"
-            pktdump = PcapWriter(file_name, append=True, sync=True)
-            while not q.empty():
-                pkt = q.get()
-                # print(pkt.show())
-                pktdump.write(pkt)
-        try:
-            pkt
-        except NameError:
-            self.comment += "\n  ICMPv4 Packet not received"
-            print "Upstream Time Exceeded Translation: FAIL"
-            return
-        self.v4_address_check(pkt)
-        if pkt[0][1].proto != 1:
-            self.comment += "\n  ICMPv6 not received" 
-            self.packet_error = True
-        if pkt[0][2].type != 11:
-            self.comment += "\n  Incorrect Type Number"
-            self.packet_error = True
-        if pkt[0][2].code != 0:
-            self.comment += "\n  Incorrect Code Number, Code was " + str(pkt[0][2].code)
-            self.packet_error = True
-        if self.packet_error:
-            fh = open("test_results.txt", "a")
-            fh.write(self.comment)
+        except Empty:
+            print("ICMPv6 packet too big -> ICMP Frag Required: FAIL")
+            fh.write("No ICMPv6 Packet Received")
             fh.close()
-            print "Upstream Time Exceeded Translation: FAIL"
-        if not self.packet_error:
-            print "Upstream Time Exceeded Translation: PASS"
+            return
 
     def parameter_problem_pointer(self):
         self.comment = "\n ICMPv6_PARAMETER_PROBLEM_POINTER"
@@ -1349,6 +1207,170 @@ class BRFunctionalityTest:
         if not self.packet_error:
             print "Upstream Parameter Problem Translation: PASS"
 
+    # This will send an upstream packet with the wrong IPv4 address embedded in bit positions 72-103
+    # The BR should either drop the packet, or rewrite the source IPv4 to the prefix that matches the source IPv4 address
+    def upstream_spoof_wrong_embedded_ip_host(self):
+        self.m_finished = False
+        self.packet_error = False
+        q = Queue()
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv6 -> IPv4 Spoofed IPv4 Source Address  \n")
+        v4_cap_filter = 'udp and src 192.0.2.28'
+        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
+        sniffer.daemon = True
+        sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64', 10, dir_uuid + "/6to4_spoof_wrong_ip_host.pcap" ))
+        capture.daemon = True
+        capture.start()
+        while not self.m_finished:
+            ip = IPv6(src="2001:db8:f0:c30:0:c612:1c:3" , dst=self.ipv6_map_address)
+            udp = UDP(sport=self.ipv6_udp_or_tcp_map_port, dport=self.ipv6_udp_or_tcp_internet_port)
+            payload = "a" * 82
+            tx_pkt = ip / udp / payload
+            send(ip / udp / payload, iface=self.scapy_interface, verbose=False)
+            sleep(.5)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
+        try:
+            pkt = q.get(timeout=1)
+            if pkt[0][1].src != self.ipv4_map_address:
+                fh.write("Packet translated normally when it SHOULD be dropped\n")
+                fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+                self.packet_error = True
+        except Empty:
+            fh.write("No packet recieved for IPv6 -> IPv4 Spoofed IPv4 Source Addres")
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Addres: PASS\n")
+            fh.close()
+            return
+        if self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Addres: FAIL")
+        if not self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Addres PASS")
+        fh.close()
+
+    # This will send an upstream packet with the wrong IPv4 prefix embedded in bit positions 72-103
+    # The BR should either drop the packet, or rewrite the source IPv4 to the prefix that matches the source IPv4 address
+    def upstream_spoof_wrong_embedded_ip_prefix(self):
+        self.m_finished = False
+        self.packet_error = False
+        q = Queue()
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv6 -> IPv4 Spoofed IPv4 Source Prefix  \n")
+        v4_cap_filter = 'udp and src net 10.0.0.0/8'
+        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
+        sniffer.daemon = True
+        sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64', 10, dir_uuid + "/6to4_spoof_wrong_ip_prefix.pcap" ))
+        capture.daemon = True
+        capture.start()
+        while not self.m_finished:
+            ip = IPv6(src="2001:db8:f0:c30:0:a00:c:3" , dst=self.ipv6_map_address)
+            udp = UDP(sport=self.ipv6_udp_or_tcp_map_port, dport=self.ipv6_udp_or_tcp_internet_port)
+            payload = "a" * 82
+            tx_pkt = ip / udp / payload
+            send(ip / udp / payload, iface=self.scapy_interface, verbose=False)
+            sleep(.5)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
+        try:
+            pkt = q.get(timeout=1)
+            if pkt[0][1].src != self.ipv4_map_address:
+                fh.write("Packet translated normally when it SHOULD be dropped\n")
+                fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+                self.packet_error = True
+        except Empty:
+            fh.write("No packet recieved for IPv6 -> IPv4 Spoofed IPv4 Source Prefix")
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Prefix: PASS\n")
+            fh.close()
+            return
+        if self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Prefix: FAIL")
+        if not self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Prefix: PASS")
+        fh.close()
+
+    def upstream_spoof_wrong_ipv6_psid(self):
+        self.m_finished = False
+        self.packet_error = False
+        q = Queue()
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv6 -> IPv4 Spoofed IPv6 PSID field  \n")
+        v4_cap_filter = 'udp and dst {}'.format(self.ipv4_internet_address)
+        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
+        sniffer.daemon = True
+        sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64', 10, dir_uuid + "/6to4_spoof_wrong_ipv6_psid.pcap" ))
+        capture.daemon = True
+        capture.start()
+        while not self.m_finished:
+            ip = IPv6(src="2001:db8:f0:c30:0:c612:c:4" , dst=self.ipv6_map_address)
+            udp = UDP(sport=self.ipv6_udp_or_tcp_map_port, dport=self.ipv6_udp_or_tcp_internet_port)
+            payload = "a" * 82
+            tx_pkt = ip / udp / payload
+            send(ip / udp / payload, iface=self.scapy_interface, verbose=False)
+            sleep(.5)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
+        try:
+            pkt = q.get(timeout=1)
+            if pkt[0][1].src != self.ipv4_map_address:
+                fh.write("Packet translated normally when it SHOULD be dropped\n")
+                fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+                self.packet_error = True
+        except Empty:
+            fh.write("No packet recieved for IPv6 -> IPv4 Spoofed IPv6 PSID field")
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Prefix: PASS\n")
+            fh.close()
+            return
+        if self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv6 PSID field: FAIL")
+        if not self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv6 PSID field: PASS")
+        fh.close()
+
+    def upstream_spoof_wrong_port_psid(self):
+        self.m_finished = False
+        self.packet_error = False
+        q = Queue()
+        fh = open(dir_uuid + "/test_results.txt", "a")
+        fh.write("IPv6 -> IPv4 Spoofed IPv6 PSID in Port  \n")
+        v4_cap_filter = 'udp and dst {}'.format(self.ipv4_internet_address)
+        sniffer = Thread(target=self.v4sniffer, args=(q, v4_cap_filter, 1))
+        sniffer.daemon = True
+        sniffer.start()
+        capture = Thread(target=self.capsniffer, args=('net 198.18.0.0/24 or net 2001:db8:ffff:ff00::/64', 10, dir_uuid + "/6to4_spoof_wrong_ipv6_port.pcap" ))
+        capture.daemon = True
+        capture.start()
+        while not self.m_finished:
+            ip = IPv6(src=self.ipv6_cpe_address , dst=self.ipv6_map_address)
+            udp = UDP(sport=16862, dport=self.ipv6_udp_or_tcp_internet_port)
+            payload = "a" * 82
+            tx_pkt = ip / udp / payload
+            send(ip / udp / payload, iface=self.scapy_interface, verbose=False)
+            sleep(.5)
+        sniffer.join()
+        capture.join()
+        fh.write("Transmitted Packet: " + tx_pkt.show2(dump=True) + "\n")
+        try:
+            pkt = q.get(timeout=1)
+            if pkt[0][1].src != self.ipv4_map_address:
+                fh.write("Packet translated normally when it SHOULD be dropped\n")
+                fh.write("Received Packet: " + pkt.show2(dump=True) + "\n")
+                self.packet_error = True
+        except Empty:
+            fh.write("No packet recieved for IPv6 -> IPv4 Spoofed IPv6 port PSID")
+            print("IPv6 -> IPv4 Spoofed IPv4 Source Prefix: PASS\n")
+            fh.close()
+            return
+        if self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv6 port PSID: FAIL")
+        if not self.packet_error:
+            print("IPv6 -> IPv4 Spoofed IPv6 port PSID: PASS")
+        fh.close()
+
     def v6_address_check(self, pkt):
         if pkt[0][IPv6].src != self.ipv6_map_address:
             self.packet_error = True
@@ -1384,10 +1406,12 @@ class BRFunctionalityTest:
     def v6sniffer(self, q, filter, count):
         packet = sniff(count=count, iface=scapy_interface, filter=filter, prn=lambda x: q.put(x), timeout=5)
         self.m_finished = True
+        return
 
     def v4sniffer(self, q, filter, count):
         packet = sniff(count=count, iface=scapy_interface, filter=filter, prn=lambda x: q.put(x), timeout=5)
         self.m_finished = True
+        return
 
     def capsniffer(self, filter, count, file):
         packets = sniff(count=count, iface=scapy_interface, filter=filter, timeout=5)
@@ -1437,8 +1461,14 @@ if __name__ == '__main__':
     #BR_obj.downstream_tcp_packet_translation()
     #BR_obj.upstream_udp_packet_translation()
     #BR_obj.upstream_tcp_packet_translation()
-    #BR_obj.downstream_outside_port()  # Needs updating
-    #BR_obj.upstream_outside_port()    # Needs updating
+    #BR_obj.downstream_outside_port() 
+    #BR_obj.upstream_outside_port()
+
+    ############        Antispoofing checks          ############
+    #BR_obj.upstream_spoof_wrong_embedded_ip_host()
+    #BR_obj.upstream_spoof_wrong_embedded_ip_prefix()
+    #BR_obj.upstream_spoof_wrong_ipv6_psid()
+    BR_obj.upstream_spoof_wrong_port_psid()
 
     ###########     ICMP/ICMPv6 Ping Translations     ############
     #BR_obj.downstream_echo_request()
@@ -1456,21 +1486,38 @@ if __name__ == '__main__':
 
     ############           Fragmentation              ############
     #BR_obj.downstream_br_fragmentation()
-    BR_obj.downstream_fragments()
-    #BR_obj.upstream_fragments()
+    #BR_obj.downstream_fragments()     # Needs work
+    #BR_obj.upstream_fragments()       # Doesn't exist
 
     ############              PMTUD                   ############
     # **********        Generated by BR               ********** #
-    #BR_obj.br_downstream_udp_frag_required()
-    #BR_obj.downstream_frag_required()
+    #BR_obj.downstream_br_udp_frag_required()
     # **********        Translated by BR              ********** #
+    #BR_obj.downstream_icmp_frag_required()
     #BR_obj.upstream_packet_too_big()
 
     ############     Additional ICMP/ICMPv6 Tests     ############
-    #BR_obj.destination_unreachable()
-    #BR_obj.time_exceeded()
-    #BR_obj.parameter_problem_pointer()
+    #BR_obj.downstream_icmp_net_unreachable() # Doesn't Exist
+    #BR_obj.downstream_icmp_host_unreachable() # Doesn't Exist
+    #BR_obj.downstream_icmp_protocol_unreachable() # Doesn't Exist
+    #BR_obj.downstream_icmp_port_unreachable() # Doesn't Exist
+    #BR_obj.downstream_icmp_source_route_failed() # Doesn't Exist
+    #BR_obj.downstream_icmp_dst_net_unkown() # Doesn't Exist
+    #BR_obj.downstream_icmp_dst_host_unkown() # Doesn't Exist
+    #BR_obj.downstream_icmp_dest_net_prohibited() # Doesn't Exist
+    #BR_obj.downstream_icmp_dest_host_prohibited() # Doesn't Exist
+    #BR_obj.downstream_icmp_dest_net_unreach_tos() # Doesn't Exist
+    #BR_obj.downstream_icmp_dest_host_unreach_tos() # Doesn't Exist
+    #BR_obj.downstream_icmp_comm_admin_prohibited() # Doesn't Exist
+    #BR_obj.downstream_host_precendence_violation() # Doesn't Exist
+    #BR_obj.downstream_precendence_cutoff() # Doesn't Exist
 
+    #BR_obj.upstream_icmp6_no_route_to_dest() # Doesn't Exist
+    #BR_obj.upstream_icmp6_comm_admin_prohibited() # Doesn't Exist
+    #BR_obj.upstream_icmp6_beyond_source_scope() # Doesn't Exist
+    #BR_obj.upstream_icmp6_address_unreachable() # Doesn't Exist
+    #BR_obj.upstream_icmp6_port_unreachable() # Doesn't Exist
+    #BR_obj.upstream_icmp6_parameter_problem() # Doesn't Exist
 
     ############          TCP MSS Clamping            ############
     #BR_obj.downstream_mss_clamping()   # Currently unused, not updated
